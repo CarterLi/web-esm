@@ -1,0 +1,10 @@
+{
+  "name": "devserver",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "@types/node": "^10.3.0",
+    "uri-js": "^4.2.2"
+  }
+}
