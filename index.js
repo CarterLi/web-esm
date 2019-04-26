@@ -1,15 +1,15 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-const fs = require("fs");
+const fs_1 = require("fs");
 const path = require("path");
-const util_1 = require("util");
 const uriJs = require("uri-js");
 const http = require("http");
+const dependency_1 = require("./dependency");
+let targetDir;
 const handleTypes = {
     js(content, request, response) {
-        const newContent = content.replace(/^(import\s.*\sfrom\s+(["']))([^./].*?\2;?)$/g, '$1./node_modules/$3');
         response.writeHead(200, { 'Content-Type': 'application/javascript' });
-        return newContent;
+        return content;
     },
     css(content, request, response) {
         if (request.headers.accept.startsWith('text/css')) {
@@ -19,10 +19,13 @@ const handleTypes = {
         response.writeHead(200, { 'Content-Type': 'application/javascript' });
         return 'document.head.insertAdjacentHTML("beforeEnd", `<style>' + content + '</style>`)';
     },
-    html(content, request, response) {
+    async html(content, request, response) {
         if (request.headers.accept.startsWith('text/html')) {
             response.writeHead(200, { 'Content-Type': 'text/html' });
-            return content + '\n<script type="module" src="./index.js"></script>';
+            const imports = await dependency_1.getImportMap(targetDir);
+            return `${content}
+<script type="importmap">${JSON.stringify({ imports })}</script>
+<script type="module" src="./index.js"></script>`;
         }
         response.writeHead(200, { 'Content-Type': 'application/javascript' });
         return 'export default `' + content + '`';
@@ -36,15 +39,25 @@ const handleTypes = {
         return 'export default ' + content;
     },
 };
-function main(targetDir) {
+function main() {
     http.createServer(async (request, response) => {
         try {
             const urlData = uriJs.parse(request.url);
-            if (urlData.path === '/')
-                urlData.path = '/index.html';
-            const [, fileExtension] = /\.([^.]+)$/.exec(urlData.path);
-            const content = await util_1.promisify(fs.readFile)(path.join(targetDir, urlData.path), { encoding: 'utf8' });
-            response.end(handleTypes[fileExtension](content, request, response));
+            let requestFile;
+            if (urlData.path === '/' && request.headers.accept.startsWith('text/html')) {
+                requestFile = path.join(targetDir, '/index.html');
+            }
+            else {
+                requestFile = path.join(targetDir, urlData.path);
+                if (request.headers.accept.startsWith('*/*')) {
+                    requestFile = require.resolve(requestFile, {
+                        paths: [targetDir],
+                    });
+                }
+            }
+            const [, fileExtension] = /\.([^.]+)$/.exec(requestFile);
+            const content = await fs_1.promises.readFile(requestFile, { encoding: 'utf8' });
+            response.end(await handleTypes[fileExtension](content, request, response));
         }
         catch (e) {
             response.writeHead(404);
@@ -56,6 +69,7 @@ if (process.argv.length < 2) {
     console.error('Usage: node . <TARGET_DIR>');
 }
 else {
-    main(path.resolve(__dirname, process.argv[process.argv.length - 1]));
+    targetDir = path.resolve(__dirname, process.argv[process.argv.length - 1]);
+    main();
 }
 //# sourceMappingURL=index.js.map

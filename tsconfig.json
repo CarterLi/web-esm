@@ -5,8 +5,16 @@
       "@root/*": ["./*"]
     },
     "pretty": true,
-    "target": "es2017",
-    "lib": ["es2017"],
+    "target": "es2018",
+    "lib": [
+      "dom",
+      "es2015",
+      "es2016",
+      "es2017",
+      "es2018",
+      "esnext"
+    ],
+    "allowSyntheticDefaultImports": true,
     "module": "commonjs",
     "moduleResolution": "node",
     "experimentalDecorators": true,

@@ -1,16 +1,17 @@
-import * as fs from 'fs';
+import { promises as fs } from 'fs';
 import * as path from 'path';
-import { promisify } from 'util';
 import * as uriJs from 'uri-js';
 import * as http from 'http';
+import { getImportMap } from './dependency';
+
+let targetDir: string;
 
 const handleTypes = {
-  js(content: string, request: http.ServerRequest, response: http.ServerResponse) {
-    const newContent = content.replace(/^(import\s.*\sfrom\s+(["']))([^./].*?\2;?)$/g, '$1./node_modules/$3');
+  js(content: string, request: http.ClientRequest, response: http.ServerResponse) {
     response.writeHead(200, { 'Content-Type': 'application/javascript' });
-    return newContent;
+    return content;
   },
-  css(content: string, request: http.ServerRequest, response: http.ServerResponse) {
+  css(content: string, request: http.IncomingMessage, response: http.ServerResponse) {
     if (request.headers.accept.startsWith('text/css')) {
       response.writeHead(200, { 'Content-Type': 'text/css' });
       return content;
@@ -18,15 +19,18 @@ const handleTypes = {
     response.writeHead(200, { 'Content-Type': 'application/javascript' });
     return 'document.head.insertAdjacentHTML("beforeEnd", `<style>' + content + '</style>`)';
   },
-  html(content: string, request: http.ServerRequest, response: http.ServerResponse) {
+  async html(content: string, request: http.IncomingMessage, response: http.ServerResponse) {
     if (request.headers.accept.startsWith('text/html')) {
       response.writeHead(200, { 'Content-Type': 'text/html' });
-      return content + '\n<script type="module" src="./index.js"></script>';
+      const imports = await getImportMap(targetDir);
+      return `${content}
+<script type="importmap">${JSON.stringify({ imports })}</script>
+<script type="module" src="./index.js"></script>`;
     }
     response.writeHead(200, { 'Content-Type': 'application/javascript' });
     return 'export default `' + content + '`';
   },
-  json(content: string, request: http.ServerRequest, response: http.ServerResponse) {
+  json(content: string, request: http.IncomingMessage, response: http.ServerResponse) {
     if (request.headers.accept.startsWith('application/json')) {
       response.writeHead(200, { 'Content-Type': 'application/json' });
       return content;
@@ -36,15 +40,25 @@ const handleTypes = {
   },
 };
 
-function main(targetDir: string) {
+function main() {
   http.createServer(async (request, response) => {
     try {
       const urlData = uriJs.parse(request.url);
-      if (urlData.path === '/') urlData.path = '/index.html';
-      const [, fileExtension] = /\.([^.]+)$/.exec(urlData.path);
+      let requestFile: string;
+      if (urlData.path === '/' && request.headers.accept.startsWith('text/html')) {
+        requestFile = path.join(targetDir, '/index.html')
+      } else {
+        requestFile = path.join(targetDir, urlData.path);
+        if (request.headers.accept.startsWith('*/*')) {
+          requestFile = require.resolve(requestFile, {
+            paths: [targetDir],
+          });
+        }
+      }
+      const [, fileExtension] = /\.([^.]+)$/.exec(requestFile);
 
-      const content = await promisify(fs.readFile)(path.join(targetDir, urlData.path), { encoding: 'utf8' });
-      response.end(handleTypes[fileExtension](content, request, response));
+      const content = await fs.readFile(requestFile, { encoding: 'utf8' });
+      response.end(await handleTypes[fileExtension](content, request, response));
     } catch (e) {
       response.writeHead(404);
       response.end();
@@ -55,5 +69,6 @@ function main(targetDir: string) {
 if (process.argv.length < 2) {
   console.error('Usage: node . <TARGET_DIR>');
 } else {
-  main(path.resolve(__dirname, process.argv[process.argv.length - 1]));
+  targetDir = path.resolve(__dirname, process.argv[process.argv.length - 1]);
+  main();
 }
