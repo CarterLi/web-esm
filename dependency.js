@@ -10,7 +10,8 @@ async function getImportMap(targetPath = __dirname) {
         .map(x => x.slice(0, x.lastIndexOf('@')))
         .map(x => {
         try {
-            return { [x]: '/' + path.relative(targetPath, require.resolve(x, { paths: [targetPath] })) };
+            const result = '/' + path.relative(targetPath, require.resolve(x, { paths: [targetPath] }));
+            return { [x]: result, [x + '/']: path.dirname(result) + '/' };
         }
         catch (_a) {
             return { [x]: undefined };
