@@ -2,10 +2,10 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as uriJs from 'uri-js';
 import * as http from 'http';
+import { resolveUser } from './resolveUser';
 import { getImportMap } from './dependency';
 
-let targetDir: string;
-
+// TODO: Handle these types using rules specified in user's webpack.config
 const handleTypes = {
   js(content: string, request: http.ClientRequest, response: http.ServerResponse) {
     response.writeHead(200, { 'Content-Type': 'application/javascript' });
@@ -16,16 +16,18 @@ const handleTypes = {
       response.writeHead(200, { 'Content-Type': 'text/css' });
       return content;
     }
+    // TODO: use css-loader
     response.writeHead(200, { 'Content-Type': 'application/javascript' });
     return 'document.head.insertAdjacentHTML("beforeEnd", `<style>' + content + '</style>`)';
   },
   async html(content: string, request: http.IncomingMessage, response: http.ServerResponse) {
     if (request.headers.accept.startsWith('text/html')) {
       response.writeHead(200, { 'Content-Type': 'text/html' });
-      const imports = await getImportMap(targetDir);
-      return `${content}
-<script type="importmap">${JSON.stringify({ imports })}</script>
-<script type="module" src="./index.js"></script>`;
+      // TODO: Use HtmlWebpackPlugin
+      const imports = await getImportMap();
+      return content.replace('<!-- INJECT SCRIPTS HERE -->', `
+<script type="importmap">${JSON.stringify({ imports }, null, 2)}</script>
+<script type="module" src="${resolveUser.config.entry}"></script>`);
     }
     response.writeHead(200, { 'Content-Type': 'application/javascript' });
     return 'export default `' + content + '`';
@@ -35,6 +37,7 @@ const handleTypes = {
       response.writeHead(200, { 'Content-Type': 'application/json' });
       return content;
     }
+    // TODO: use json-loader
     response.writeHead(200, { 'Content-Type': 'application/javascript' });
     return 'export default ' + content;
   },
@@ -44,17 +47,10 @@ function main() {
   http.createServer(async (request, response) => {
     try {
       const urlData = uriJs.parse(request.url);
-      let requestFile: string;
       if (urlData.path === '/' && request.headers.accept.startsWith('text/html')) {
-        requestFile = path.join(targetDir, '/index.html')
-      } else {
-        requestFile = path.join(targetDir, urlData.path);
-        if (request.headers.accept.startsWith('*/*')) {
-          requestFile = require.resolve(requestFile, {
-            paths: [targetDir],
-          });
-        }
+        urlData.path = '@/index.html';
       }
+      const requestFile = await resolveUser(urlData.path);
       const [, fileExtension] = /\.([^.]+)$/.exec(requestFile);
 
       const content = await fs.readFile(requestFile, { encoding: 'utf8' });
@@ -67,8 +63,8 @@ function main() {
 }
 
 if (process.argv.length < 2) {
-  console.error('Usage: node . <TARGET_DIR>');
+  console.error('Usage: node . </path/to/project>');
 } else {
-  targetDir = path.resolve(__dirname, process.argv[process.argv.length - 1]);
+  resolveUser.init(path.resolve(__dirname, process.argv[process.argv.length - 1]));
   main();
 }
